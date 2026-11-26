@@ -24,9 +24,13 @@ Object.assign(TRANSLATIONS.en, { apiKeyPlaceholder: "Enter your API key here..."
 Object.assign(TRANSLATIONS.uk, { selfUninstallEnabled: "Увімкнути самовидалення", selfUninstallShortcut: "Гаряча клавіша видалення", selfUninstallPlaceholder: "Alt+Shift+K", selfUninstallHelp: "Після натискання розширення видалиться без підтвердження.", applyUninstallShortcut: "Застосувати клавішу видалення" });
 Object.assign(TRANSLATIONS.ru, { selfUninstallEnabled: "Включить самоудаление", selfUninstallShortcut: "Горячая клавиша удаления", selfUninstallPlaceholder: "Alt+Shift+K", selfUninstallHelp: "После нажатия расширение удалится без подтверждения.", applyUninstallShortcut: "Применить клавишу удаления" });
 Object.assign(TRANSLATIONS.en, { selfUninstallEnabled: "Enable self-uninstall", selfUninstallShortcut: "Uninstall shortcut", selfUninstallPlaceholder: "Alt+Shift+K", selfUninstallHelp: "Pressing it will uninstall the extension without confirmation.", applyUninstallShortcut: "Apply uninstall shortcut" });
+Object.assign(TRANSLATIONS.uk, { restoreDefaultInstruction: "Вставити стандартну інструкцію" });
+Object.assign(TRANSLATIONS.ru, { restoreDefaultInstruction: "Вставить стандартную инструкцию" });
+Object.assign(TRANSLATIONS.en, { restoreDefaultInstruction: "Insert default instruction" });
 const apiKeyInput = document.getElementById("api-key");
 const hideApiKeyInput = document.getElementById("hide-api-key");
 const instructionInput = document.getElementById("system-instruction");
+const restoreDefaultInstructionButton = document.getElementById("restore-default-instruction");
 const captureModeInput = document.getElementById("capture-mode");
 const captureIntervalInput = document.getElementById("capture-interval");
 const intervalField = document.getElementById("interval-field");
@@ -74,6 +78,12 @@ hideApiKeyInput.addEventListener("change", async () => {
 
 opacityInput.addEventListener("input", () => { opacityValue.textContent = Number(opacityInput.value).toFixed(2); });
 instructionInput.addEventListener("input", resizeInstructionInput);
+restoreDefaultInstructionButton.addEventListener("click", () => {
+  instructionInput.value = DEFAULT_SYSTEM_INSTRUCTION;
+  resizeInstructionInput();
+  showButtonSuccess(restoreDefaultInstructionButton);
+  status.textContent = t("restoreDefaultInstruction");
+});
 systemInstructionLabel.addEventListener("click", revealSnowflake);
 systemInstructionLabel.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
