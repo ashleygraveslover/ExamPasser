@@ -19,7 +19,7 @@
       return;
     }
     if (message?.type === "get-test-options") {
-      sendResponse({ options: collectTestOptions() });
+      sendResponse({ options: collectTestOptions(), selectionMode: detectSelectionMode() });
       return;
     }
     if (message?.type === "show-loading") showLoading();
@@ -107,5 +107,13 @@
       if (options.length >= 20) break;
     }
     return options;
+  }
+
+  function detectSelectionMode() {
+    const checkboxes = document.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
+    if (checkboxes.length > 0) return "multiple";
+    const radios = document.querySelectorAll('input[type="radio"], [role="radio"]');
+    if (radios.length > 0) return "single";
+    return "unknown";
   }
 })();

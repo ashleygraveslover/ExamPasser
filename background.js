@@ -1,18 +1,19 @@
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
 const DEFAULT_SYSTEM_INSTRUCTION = "You are an advanced visual test-solving AI designed to identify and solve test questions from images with maximum accuracy.\n\n1. TEST IDENTIFICATION\nFirst, determine whether the provided image contains an actual test, quiz, or question with answer choices.\nIf the image is not a test, contains an unrelated screenshot, or does not contain a recognizable test question, output exactly: !\nDo not attempt to answer unrelated content.\n\n2. QUESTION AND IMAGE ANALYSIS\nCarefully inspect the entire image before answering.\nRead all visible text, answer choices, symbols, diagrams, tables, formulas, and mathematical expressions.\nPay close attention to small text, punctuation, visual details, and potentially misleading wording.\nIf multiple questions are visible, solve all of them in their original order.\nNever skip a question that can be reasonably interpreted.\n\n3. ANSWER IDENTIFICATION\nAnalyze every answer choice before selecting the correct answer.\nUse factual knowledge, logical reasoning, mathematical calculations, and subject-specific expertise.\nVerify the selected answers before submitting.\nNever select an answer based solely on its apparent plausibility.\nDo not confuse similar answer choices or overlook subtle differences.\n\n4. ANSWER NUMBERING\nIf answer choices have letters (A, B, C, D, etc.), return their original letters.\nIf answer choices have numbers, return their original numbers.\nIf answer choices are presented as plain text without letters or numbers, assign numbers sequentially from top to bottom: 1, 2, 3, 4, etc.\nIn this case, ALWAYS return the assigned numbers, never the answer text itself.\nPreserve the original order of answer choices.\n\n5. SINGLE-ANSWER VS. MULTIPLE-ANSWER QUESTIONS\nRadio buttons generally indicate a single correct answer.\nCheckboxes generally indicate multiple correct answers.\nExplicit instructions such as \"Select all that apply\", \"Choose multiple answers\", or equivalent wording indicate multiple correct answers.\nDo not assume that a difficult question requires multiple answers.\nFollow the question's explicit instructions and interface indicators.\nSelect all correct answers when multiple selections are required, and never include incorrect options.\n\n6. CRITICAL ATTENTION TO TRICK QUESTIONS\nPay special attention to:\nNegative wording: NOT, EXCEPT, FALSE, INCORRECT, LEAST, NEVER.\nExpressions such as \"All except\", \"Which is NOT correct\", and \"Select the incorrect statement\".\nMathematical signs, decimal points, exponents, units, and formulas.\nSimilar terminology and subtle differences between answer choices.\nHidden conditions, exceptions, and details in diagrams or tables.\n\n7. FINAL VERIFICATION\nBefore responding:\nRecheck the question and selected answers.\nConfirm that no negative wording was overlooked.\nVerify calculations and factual accuracy.\nEnsure the number of selected answers matches the question's requirements.\nEnsure the output follows the exact required format.\n\n8. STRICT OUTPUT FORMAT\nReturn ONLY the letters or numbers of the correct answers.\nSeparate multiple answers with commas.\nFor multiple questions, preserve their original order and use a clear numbering format for each question.\nNever include explanations, reasoning, introductions, conclusions, or additional comments.\nNever return the answer text when numerical or alphabetical identifiers are required.\nIf the image is not a recognizable test, return only: !\n\nYour highest priorities are accuracy, precise visual interpretation, and strict compliance with the output format.";
-const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_GEMINI_ATTEMPTS = 3;
+const REQUEST_TIMEOUT_MS = 15_000;
+const DAILY_REQUEST_LIMIT = 500;
+const REPEAT_ANALYSIS_WINDOW_MS = 5 * 60 * 1000;
+const MAX_GEMINI_ATTEMPTS = 2;
 const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
 const AUTO_CAPTURE_ALARM = "quickpeek-auto-capture";
 const ANALYSIS_SCHEMA = {
   type: "object",
   properties: {
     taskType: { type: "string", enum: ["test", "non_test", "unclear"], description: "Whether the image contains a test question." },
-    selectionMode: { type: "string", enum: ["single", "multiple", "none", "unknown"], description: "Whether the UI permits one or multiple answers." },
     answers: { type: "array", items: { type: "string" }, description: "Only answer labels or top-to-bottom option numbers. Never copy the full option text." },
     confidence: { type: "string", enum: ["high", "medium", "low"] }
   },
-  required: ["taskType", "selectionMode", "answers", "confidence"]
+  required: ["taskType", "answers", "confidence"]
 };
 
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -134,15 +135,22 @@ async function analyzeActiveTab() {
       return;
     }
 
-    const precisionMode = settings.precisionMode === "precision" ? "precision" : "fast";
+    const precisionMode = "precision";
     const imageFormat = precisionMode === "precision" ? "png" : "jpeg";
     const selectionHint = settings.includeSelectionHint ? await getSelectionHint(tab.id) : "";
     const optionHint = await getOptionHint(tab.id);
+    const selectionModeHint = await getSelectionModeHint(tab.id);
     const captureOptions = { format: imageFormat };
     if (imageFormat === "jpeg") captureOptions.quality = 90;
     const imageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, captureOptions);
     const imageBase64 = imageDataUrl.replace(new RegExp(`^data:image/${imageFormat};base64,`), "");
     if (!imageBase64) throw new Error("Screenshot data is empty");
+
+    const repeatAnalysis = await getRepeatAnalysisState(imageBase64);
+    const effectivePrecisionMode = repeatAnalysis.shouldThinkAgain ? "precision" : precisionMode;
+    const repeatInstruction = repeatAnalysis.shouldThinkAgain
+      ? "\n\nЭто повторный снимок того же задания после неуверенного ответа. Проверь решение заново особенно внимательно: перечитай условие и все варианты, проверь отрицания, формулы и количество правильных ответов. Не доверяй предыдущему ответу автоматически."
+      : "";
 
     let text;
     try {
@@ -151,26 +159,29 @@ async function analyzeActiveTab() {
         imageBase64,
         mimeType: `image/${imageFormat}`,
         model: GEMINI_MODEL,
-        precisionMode,
+        precisionMode: effectivePrecisionMode,
         selectionHint,
         optionHint,
+        selectionModeHint,
         structuredOutput: true,
-        systemInstruction: enforceCompactInstruction(settings.systemInstruction)
+        systemInstruction: enforceCompactInstruction(`${settings.systemInstruction}${repeatInstruction}`)
       });
     } catch (error) {
-      if (!/Gemini HTTP 400:/.test(error?.message ?? "")) throw error;
+      if (!isStructuredOutputFailure(error)) throw error;
       text = await requestGemini({
         apiKey,
         imageBase64,
         mimeType: `image/${imageFormat}`,
         model: GEMINI_MODEL,
-        precisionMode,
+        precisionMode: effectivePrecisionMode,
         selectionHint,
         optionHint,
+        selectionModeHint,
         structuredOutput: false,
-        systemInstruction: `${settings.systemInstruction || DEFAULT_SYSTEM_INSTRUCTION}\n\nВерни только номер или букву правильного варианта. Если варианты без номеров, пронумеруй их сверху вниз. Если это не тест, верни только !.`
+        systemInstruction: `${settings.systemInstruction || DEFAULT_SYSTEM_INSTRUCTION}${repeatInstruction}\n\nВерни только номер или букву правильного варианта. Если варианты без номеров, пронумеруй их сверху вниз. Если это не тест, верни только !.`
       });
     }
+    await rememberAnalysisState(imageBase64, text);
     await sendMessage(tab.id, { type: "show-result", text: formatAnalysisResult(text) });
   } catch (error) {
     console.warn("ExamPasser request failed:", error);
@@ -178,6 +189,44 @@ async function analyzeActiveTab() {
       await sendMessage(tab.id, { type: "show-result", text: "?" });
     }
   }
+}
+
+async function getRepeatAnalysisState(imageBase64) {
+  try {
+    const fingerprint = await fingerprintImage(imageBase64);
+    const state = await chrome.storage.local.get({ lastAnalysisFingerprint: "", lastAnalysisAt: 0, lastAnalysisUncertain: false, repeatAnalysisDepth: 0 });
+    const isSameRecentImage = state.lastAnalysisFingerprint === fingerprint && Date.now() - Number(state.lastAnalysisAt) <= REPEAT_ANALYSIS_WINDOW_MS;
+    return {
+      shouldThinkAgain: isSameRecentImage && state.lastAnalysisUncertain === true,
+      fingerprint,
+      depth: isSameRecentImage ? Number(state.repeatAnalysisDepth) || 0 : 0
+    };
+  } catch {
+    return { shouldThinkAgain: false, fingerprint: "", depth: 0 };
+  }
+}
+
+async function rememberAnalysisState(imageBase64, result) {
+  try {
+    const fingerprint = await fingerprintImage(imageBase64);
+    const previous = await chrome.storage.local.get({ lastAnalysisFingerprint: "", repeatAnalysisDepth: 0 });
+    const sameImage = previous.lastAnalysisFingerprint === fingerprint;
+    const uncertain = result?.taskType !== "non_test" && (result?.confidence === "medium" || result?.confidence === "low");
+    await chrome.storage.local.set({
+      lastAnalysisFingerprint: fingerprint,
+      lastAnalysisAt: Date.now(),
+      lastAnalysisUncertain: uncertain,
+      repeatAnalysisDepth: sameImage ? Math.min(2, (Number(previous.repeatAnalysisDepth) || 0) + 1) : 0
+    });
+  } catch {
+    // Repeat analysis is an optimization; a storage/hash failure must not break the answer flow.
+  }
+}
+
+async function fingerprintImage(imageBase64) {
+  const bytes = new TextEncoder().encode(imageBase64);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function getSelectionHint(tabId) {
@@ -193,6 +242,15 @@ async function getOptionHint(tabId) {
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: "get-test-options" });
     return Array.isArray(response?.options) ? response.options.join("\n").slice(0, 6000) : "";
+  } catch {
+    return "";
+  }
+}
+
+async function getSelectionModeHint(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: "get-test-options" });
+    return ["single", "multiple"].includes(response?.selectionMode) ? response.selectionMode : "";
   } catch {
     return "";
   }
@@ -216,11 +274,12 @@ function sendMessage(tabId, message) {
   return chrome.tabs.sendMessage(tabId, message).catch(() => undefined);
 }
 
-async function requestGemini({ apiKey, imageBase64, mimeType, model, precisionMode, selectionHint, optionHint, structuredOutput, systemInstruction }) {
+async function requestGemini({ apiKey, imageBase64, mimeType, model, precisionMode, selectionHint, optionHint, selectionModeHint, structuredOutput, systemInstruction }) {
   for (let attempt = 1; attempt <= MAX_GEMINI_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
+      await recordApiRequest();
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
         {
@@ -231,13 +290,14 @@ async function requestGemini({ apiKey, imageBase64, mimeType, model, precisionMo
             systemInstruction: { parts: [{ text: systemInstruction }] },
             generationConfig: {
               ...(structuredOutput ? { responseMimeType: "application/json", responseJsonSchema: ANALYSIS_SCHEMA } : {}),
-              maxOutputTokens: structuredOutput ? (precisionMode === "precision" ? 1536 : 1024) : 128,
-              thinkingConfig: { thinkingLevel: precisionMode === "precision" ? "MEDIUM" : "MINIMAL" }
+              maxOutputTokens: structuredOutput ? 3072 : 128,
+              thinkingConfig: { thinkingLevel: structuredOutput ? "MEDIUM" : "MINIMAL" }
             },
             contents: [{
               role: "user",
               parts: [
                 ...(optionHint ? [{ text: `Варіанти, зчитані зі сторінки та пронумеровані зверху вниз:\n${optionHint}` }] : []),
+                ...(selectionModeHint ? [{ text: selectionModeHint === "single" ? "КРИТИЧНО: інтерфейс дозволяє вибрати лише ОДНУ відповідь. Поверни рівно один елемент у answers." : "Інтерфейс дозволяє кілька відповідей. Поверни всі правильні варіанти." }] : []),
                 ...(selectionHint ? [{ text: `Текст, виділений користувачем для фокусу:\n${selectionHint}` }] : []),
                 { inline_data: { mime_type: mimeType, data: imageBase64 } }
               ]
@@ -255,9 +315,15 @@ async function requestGemini({ apiKey, imageBase64, mimeType, model, precisionMo
         continue;
       }
       const data = await response.json();
+      if (data?.error) {
+        const providerCode = Number(data.error.code) || response.status;
+        throw new Error(`Gemini HTTP ${providerCode}: ${String(data.error.message || "Provider returned an error").slice(0, 500)}`);
+      }
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (typeof text !== "string" || !text.trim()) throw new Error("Gemini returned no text");
-      return parseAnalysis(text, optionHint);
+      return structuredOutput
+        ? parseStructuredAnalysis(text, selectionModeHint)
+        : parsePlainAnalysis(text, optionHint, selectionModeHint);
     } catch (error) {
       if (attempt === MAX_GEMINI_ATTEMPTS || !isRetryableError(error)) throw error;
       await sleep(getRetryDelay(attempt));
@@ -268,19 +334,48 @@ async function requestGemini({ apiKey, imageBase64, mimeType, model, precisionMo
   throw new Error("Gemini request exhausted all retry attempts");
 }
 
-function parseAnalysis(value, optionHint = "") {
+function parseStructuredAnalysis(value, selectionModeHint = "") {
+  let parsed;
   try {
-    const parsed = JSON.parse(extractJsonObject(value));
-    return {
-      taskType: parsed?.taskType,
-      selectionMode: parsed?.selectionMode,
-      answers: Array.isArray(parsed?.answers) ? parsed.answers : [],
-      confidence: parsed?.confidence
-    };
+    parsed = JSON.parse(extractJsonObject(value));
   } catch {
-    const answer = extractPlainAnswer(value, optionHint);
-    return { taskType: answer === "!" ? "non_test" : "unclear", selectionMode: "unknown", answers: answer === "!" ? [] : [answer], confidence: "low" };
+    throw new Error("Structured Gemini response is not valid JSON");
   }
+
+  const taskType = parsed?.taskType;
+  const confidence = parsed?.confidence;
+  if (!["test", "non_test", "unclear"].includes(taskType)) {
+    throw new Error("Structured Gemini response has invalid taskType");
+  }
+  if (!["high", "medium", "low"].includes(confidence)) {
+    throw new Error("Structured Gemini response has invalid confidence");
+  }
+  if (!Array.isArray(parsed?.answers) || parsed.answers.some((answer) => typeof answer !== "string")) {
+    throw new Error("Structured Gemini response has invalid answers");
+  }
+
+  return {
+    taskType,
+    selectionMode: selectionModeHint || "unknown",
+    answers: normalizeAnswers(parsed.answers, selectionModeHint),
+    confidence
+  };
+}
+
+function parsePlainAnalysis(value, optionHint = "", selectionModeHint = "") {
+  const answer = extractPlainAnswer(value, optionHint);
+  return {
+    taskType: answer === "!" ? "non_test" : "unclear",
+    selectionMode: selectionModeHint || "unknown",
+    answers: answer === "!" ? [] : answer === "?" ? [] : answer.split(/\s*,\s*/),
+    confidence: "low"
+  };
+}
+
+function normalizeAnswers(answers, selectionMode) {
+  if (!Array.isArray(answers)) return [];
+  const normalized = answers.filter((answer) => typeof answer === "string" && answer.trim());
+  return selectionMode === "single" ? normalized.slice(0, 1) : normalized;
 }
 
 function extractJsonObject(value) {
@@ -291,6 +386,11 @@ function extractJsonObject(value) {
   return text.slice(firstBrace, lastBrace + 1);
 }
 
+function isStructuredOutputFailure(error) {
+  const message = String(error?.message || "");
+  return message.startsWith("Structured Gemini response") || /Gemini HTTP 400:/.test(message);
+}
+
 function formatAnalysisResult(result) {
   if (!result || result.taskType === "non_test") return "!";
   const answers = result.answers
@@ -299,7 +399,7 @@ function formatAnalysisResult(result) {
   if (answers.length === 0) return "?";
   const text = answers.join(", ");
   if (answers.every((answer) => answer === "?" || answer === "~")) return "?";
-  return result.confidence === "low" ? `~ ${text}` : text;
+  return result.confidence === "medium" || result.confidence === "low" ? `~ ${text}` : text;
 }
 
 function compactAnswer(value) {
@@ -342,7 +442,7 @@ function normalizeComparableText(value) {
 
 function enforceCompactInstruction(value) {
   const instruction = typeof value === "string" && value.trim() ? value.trim() : DEFAULT_SYSTEM_INSTRUCTION;
-  return `${instruction}\n\nКРИТИЧЕСКОЕ ПРАВИЛО ФОРМАТА: верни только JSON по заданной схеме. Не добавляй reasoning, объяснения или текст вне JSON. Если это не тест, taskType должен быть non_test, а answers — пустым массивом. Если передан список вариантов со страницы, используй его для сопоставления ответа и номера. Если варианты на экране не подписаны буквами или цифрами, answers обязан содержать их порядковые номера сверху вниз, а не текст вариантов.`;
+  return `${instruction}\n\nКРИТИЧЕСКОЕ ПРАВИЛО ФОРМАТА: верни только один компактный JSON-объект без markdown, reasoning и текста до или после него. Используй ровно эти поля: {"taskType":"test|non_test|unclear","answers":["1"],"confidence":"high|medium|low"}. Если это не тест, верни {"taskType":"non_test","answers":[],"confidence":"high"}. Если это тест с одним вариантом, answers должен содержать ровно один элемент. Если вариантов несколько, верни все правильные элементы через массив. Если варианты не подписаны, используй их порядковые номера сверху вниз, а не текст ответов. Не добавляй другие поля.`;
 }
 
 function isRetryableError(error) {
@@ -355,6 +455,23 @@ function getRetryDelay(attempt) {
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function recordApiRequest() {
+  try {
+    const today = getPacificDateKey();
+    const usage = await chrome.storage.local.get({ dailyRequestDate: today, dailyRequestCount: 0 });
+    const count = usage.dailyRequestDate === today ? Number(usage.dailyRequestCount) || 0 : 0;
+    await chrome.storage.local.set({ dailyRequestDate: today, dailyRequestCount: Math.min(DAILY_REQUEST_LIMIT, count + 1) });
+  } catch {
+    // Usage telemetry must never block a Gemini request.
+  }
+}
+
+function getPacificDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+  const values = Object.fromEntries(parts.filter(({ type }) => type !== "literal").map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function updateCommandShortcut(shortcut, commandName = "analyze-screen") {

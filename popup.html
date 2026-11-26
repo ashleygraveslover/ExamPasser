@@ -52,6 +52,7 @@
     button.secondary:active, button.secondary.pressed { color: #fff; background: linear-gradient(135deg, #35c878, #19a968); border-color: #57e39a; box-shadow: 0 0 0 2px #57e39a33, 0 7px 18px #23bd7544; }
     button.success { color: #fff; background: linear-gradient(135deg, #35c878, #19a968); border-color: #57e39a; box-shadow: 0 0 0 2px #57e39a33, 0 7px 18px #23bd7544; }
     #status { min-height: 15px; margin-top: 9px; color: #7ee2b8; text-align: center; font-size: 11px; }
+    .api-usage { margin-top: 10px; color: #817d99; font-size: 10px; text-align: center; }
     .instruction-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .instruction-label-row label { flex: 1; margin-bottom: 5px; }
     .snowflake-trigger { position: absolute; z-index: 25; width: 26px; height: 26px; margin: 0; padding: 0; border: 1px solid #8fdcff66; border-radius: 50%; color: #dff8ff; background: #4daeff33; box-shadow: 0 0 14px #62dfff66; font-size: 16px; line-height: 1; }
@@ -127,14 +128,10 @@
   </section>
   <section class="section">
     <div class="section-title" data-i18n="response">Відповідь</div>
-    <label for="precision-mode" data-i18n="precisionMode">Точність аналізу</label>
-    <select id="precision-mode">
-      <option value="fast" data-i18n="fastPrecision">Швидкий режим</option>
-      <option value="precision" data-i18n="precisionPrecision">Точний режим</option>
-    </select>
     <label class="checkbox-row"><input id="selection-hint" type="checkbox"><span data-i18n="selectionHint">Використовувати виділений текст як підказку</span></label>
     <label for="opacity" data-i18n="opacity">Прозорість тексту</label>
     <div class="range-row"><input id="opacity" type="range" min="0.1" max="1" step="0.05"><span id="opacity-value">0.45</span></div>
+    <div id="request-usage" class="api-usage" aria-live="polite">Запити сьогодні: 0 / 500 · залишилось: 500</div>
   </section>
   <section class="section">
     <div class="section-title" data-i18n="controls">Керування</div>

@@ -1,5 +1,6 @@
 const DEFAULT_SYSTEM_INSTRUCTION = "You are an advanced visual test-solving AI designed to identify and solve test questions from images with maximum accuracy.\n\n1. TEST IDENTIFICATION\nFirst, determine whether the provided image contains an actual test, quiz, or question with answer choices.\nIf the image is not a test, contains an unrelated screenshot, or does not contain a recognizable test question, output exactly: !\nDo not attempt to answer unrelated content.\n\n2. QUESTION AND IMAGE ANALYSIS\nCarefully inspect the entire image before answering.\nRead all visible text, answer choices, symbols, diagrams, tables, formulas, and mathematical expressions.\nPay close attention to small text, punctuation, visual details, and potentially misleading wording.\nIf multiple questions are visible, solve all of them in their original order.\nNever skip a question that can be reasonably interpreted.\n\n3. ANSWER IDENTIFICATION\nAnalyze every answer choice before selecting the correct answer.\nUse factual knowledge, logical reasoning, mathematical calculations, and subject-specific expertise.\nVerify the selected answers before submitting.\nNever select an answer based solely on its apparent plausibility.\nDo not confuse similar answer choices or overlook subtle differences.\n\n4. ANSWER NUMBERING\nIf answer choices have letters (A, B, C, D, etc.), return their original letters.\nIf answer choices have numbers, return their original numbers.\nIf answer choices are presented as plain text without letters or numbers, assign numbers sequentially from top to bottom: 1, 2, 3, 4, etc.\nIn this case, ALWAYS return the assigned numbers, never the answer text itself.\nPreserve the original order of answer choices.\n\n5. SINGLE-ANSWER VS. MULTIPLE-ANSWER QUESTIONS\nRadio buttons generally indicate a single correct answer.\nCheckboxes generally indicate multiple correct answers.\nExplicit instructions such as \"Select all that apply\", \"Choose multiple answers\", or equivalent wording indicate multiple correct answers.\nDo not assume that a difficult question requires multiple answers.\nFollow the question's explicit instructions and interface indicators.\nSelect all correct answers when multiple selections are required, and never include incorrect options.\n\n6. CRITICAL ATTENTION TO TRICK QUESTIONS\nPay special attention to:\nNegative wording: NOT, EXCEPT, FALSE, INCORRECT, LEAST, NEVER.\nExpressions such as \"All except\", \"Which is NOT correct\", and \"Select the incorrect statement\".\nMathematical signs, decimal points, exponents, units, and formulas.\nSimilar terminology and subtle differences between answer choices.\nHidden conditions, exceptions, and details in diagrams or tables.\n\n7. FINAL VERIFICATION\nBefore responding:\nRecheck the question and selected answers.\nConfirm that no negative wording was overlooked.\nVerify calculations and factual accuracy.\nEnsure the number of selected answers matches the question's requirements.\nEnsure the output follows the exact required format.\n\n8. STRICT OUTPUT FORMAT\nReturn ONLY the letters or numbers of the correct answers.\nSeparate multiple answers with commas.\nFor multiple questions, preserve their original order and use a clear numbering format for each question.\nNever include explanations, reasoning, introductions, conclusions, or additional comments.\nNever return the answer text when numerical or alphabetical identifiers are required.\nIf the image is not a recognizable test, return only: !\n\nYour highest priorities are accuracy, precise visual interpretation, and strict compliance with the output format.";
 const DEFAULT_OPACITY = 0.45;
+const DAILY_REQUEST_LIMIT = 500;
 const DEFAULT_LANGUAGE = "uk";
 const TRANSLATIONS = {
   uk: {
@@ -27,6 +28,9 @@ Object.assign(TRANSLATIONS.en, { selfUninstallEnabled: "Enable self-uninstall", 
 Object.assign(TRANSLATIONS.uk, { restoreDefaultInstruction: "Вставити стандартну інструкцію" });
 Object.assign(TRANSLATIONS.ru, { restoreDefaultInstruction: "Вставить стандартную инструкцию" });
 Object.assign(TRANSLATIONS.en, { restoreDefaultInstruction: "Insert default instruction" });
+Object.assign(TRANSLATIONS.uk, { requestUsage: "Запити сьогодні: {used} / 500 · залишилось: {remaining}" });
+Object.assign(TRANSLATIONS.ru, { requestUsage: "Запросы сегодня: {used} / 500 · осталось: {remaining}" });
+Object.assign(TRANSLATIONS.en, { requestUsage: "Requests today: {used} / 500 · remaining: {remaining}" });
 const apiKeyInput = document.getElementById("api-key");
 const hideApiKeyInput = document.getElementById("hide-api-key");
 const instructionInput = document.getElementById("system-instruction");
@@ -35,8 +39,8 @@ const captureModeInput = document.getElementById("capture-mode");
 const captureIntervalInput = document.getElementById("capture-interval");
 const intervalField = document.getElementById("interval-field");
 const modeButtons = [...document.querySelectorAll(".mode-button")];
-const precisionModeInput = document.getElementById("precision-mode");
 const selectionHintInput = document.getElementById("selection-hint");
+const requestUsage = document.getElementById("request-usage");
 const opacityInput = document.getElementById("opacity");
 const opacityValue = document.getElementById("opacity-value");
 const shortcutInput = document.getElementById("shortcut");
@@ -64,6 +68,11 @@ const buttonFeedbackTimers = new WeakMap();
 applyLanguage(DEFAULT_LANGUAGE);
 void loadSettings();
 void loadShortcut();
+void loadRequestUsage();
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && (changes.dailyRequestCount || changes.dailyRequestDate)) void loadRequestUsage();
+});
 
 languageInput.addEventListener("change", async () => {
   const language = languageInput.value === "en" ? "en" : languageInput.value === "ru" ? "ru" : DEFAULT_LANGUAGE;
@@ -111,7 +120,7 @@ modeButtons.forEach((button) => button.addEventListener("click", () => {
 saveButton.addEventListener("click", async () => {
   saveButton.disabled = true;
   try {
-    await chrome.storage.local.set({ apiKey: apiKeyInput.value.trim(), apiKeyHidden: hideApiKeyInput.checked, language: languageInput.value === "en" ? "en" : languageInput.value === "ru" ? "ru" : DEFAULT_LANGUAGE, systemInstruction: instructionInput.value.trim() || DEFAULT_SYSTEM_INSTRUCTION, captureMode: captureModeInput.value === "automatic" ? "automatic" : "manual", captureIntervalSeconds: normalizeInterval(captureIntervalInput.value), modelMode: "fast", precisionMode: precisionModeInput.value === "precision" ? "precision" : "fast", includeSelectionHint: selectionHintInput.checked, opacity: normalizeOpacity(opacityInput.value), winterVibe: winterVibeInput.checked, selfUninstallEnabled: selfUninstallEnabledInput.checked });
+    await chrome.storage.local.set({ apiKey: apiKeyInput.value.trim(), apiKeyHidden: hideApiKeyInput.checked, language: languageInput.value === "en" ? "en" : languageInput.value === "ru" ? "ru" : DEFAULT_LANGUAGE, systemInstruction: instructionInput.value.trim() || DEFAULT_SYSTEM_INSTRUCTION, captureMode: captureModeInput.value === "automatic" ? "automatic" : "manual", captureIntervalSeconds: normalizeInterval(captureIntervalInput.value), modelMode: "fast", precisionMode: "precision", includeSelectionHint: selectionHintInput.checked, opacity: normalizeOpacity(opacityInput.value), winterVibe: winterVibeInput.checked, selfUninstallEnabled: selfUninstallEnabledInput.checked });
     showButtonSuccess(saveButton);
     status.textContent = t("saved");
     setTimeout(() => { status.textContent = ""; }, 1600);
@@ -172,13 +181,29 @@ async function loadSettings() {
     captureModeInput.value = settings.captureMode === "automatic" ? "automatic" : "manual";
     const savedInterval = (settings.captureIntervalSeconds ?? (Number(settings.captureIntervalMinutes) * 60)) || 60;
     captureIntervalInput.value = String(normalizeInterval(savedInterval)); updateCaptureModeState();
-    precisionModeInput.value = settings.precisionMode === "precision" ? "precision" : "fast";
     selectionHintInput.checked = settings.includeSelectionHint === true;
     opacityInput.value = String(normalizeOpacity(settings.opacity)); opacityValue.textContent = Number(opacityInput.value).toFixed(2);
     winterVibeInput.checked = settings.winterVibe === true;
     selfUninstallEnabledInput.checked = settings.selfUninstallEnabled !== false;
     renderSnow();
   } catch { status.textContent = t("loadError"); }
+}
+
+async function loadRequestUsage() {
+  try {
+    const today = getPacificDateKey();
+    const usage = await chrome.storage.local.get({ dailyRequestDate: today, dailyRequestCount: 0 });
+    const used = usage.dailyRequestDate === today ? Math.min(DAILY_REQUEST_LIMIT, Math.max(0, Number(usage.dailyRequestCount) || 0)) : 0;
+    requestUsage.textContent = t("requestUsage").replace("{used}", String(used)).replace("{remaining}", String(Math.max(0, DAILY_REQUEST_LIMIT - used)));
+  } catch {
+    requestUsage.textContent = t("requestUsage").replace("{used}", "?").replace("{remaining}", "?");
+  }
+}
+
+function getPacificDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+  const values = Object.fromEntries(parts.filter(({ type }) => type !== "literal").map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 async function loadShortcut() {
