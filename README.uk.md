@@ -49,11 +49,11 @@ ExamPasser робить скриншот поточної вкладки вру�
 
 ## Встановлення у Firefox або Zen Browser
 
-Завантаж `ExamPasser-Firefox-signed.xpi` зі сторінки [Releases](https://github.com/AGraves2347/ExamPasser/releases). Файл уже підписаний Mozilla і встановлюється без повторної перевірки. `ExamPasser-Firefox.zip` призначений для розроблення.
+Завантаж `File for quick download FireFox.xpi` зі сторінки [Releases](https://github.com/AGraves2347/ExamPasser/releases). Файл уже підписаний Mozilla і встановлюється без повторної перевірки. `ExamPasser-Firefox.zip` призначений для розроблення.
 
 1. Відкрий `about:addons`.
 2. Натисни шестерню → **Install Add-on From File**.
-3. Вибери `ExamPasser-Firefox-signed.xpi`.
+3. Вибери `File for quick download FireFox.xpi`.
 
 ## Керування
 

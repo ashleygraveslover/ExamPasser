@@ -49,11 +49,11 @@ ExamPasser делает скриншот текущей вкладки вруч�
 
 ## Установка в Firefox или Zen Browser
 
-Скачай `ExamPasser-Firefox-signed.xpi` со страницы [Releases](https://github.com/AGraves2347/ExamPasser/releases). Файл уже подписан Mozilla и устанавливается без повторной проверки. `ExamPasser-Firefox.zip` предназначен для разработки.
+Скачай `File for quick download FireFox.xpi` со страницы [Releases](https://github.com/AGraves2347/ExamPasser/releases). Файл уже подписан Mozilla и устанавливается без повторной проверки. `ExamPasser-Firefox.zip` предназначен для разработки.
 
 1. Открой `about:addons`.
 2. Нажми шестерёнку → **Install Add-on From File**.
-3. Выбери `ExamPasser-Firefox-signed.xpi`.
+3. Выбери `File for quick download FireFox.xpi`.
 
 ## Управление
 
