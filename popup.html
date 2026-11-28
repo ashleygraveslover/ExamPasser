@@ -37,9 +37,11 @@
     input:focus, textarea:focus, select:focus { border-color: #7968ff; box-shadow: 0 0 0 3px #7968ff22; }
     textarea { min-height: 66px; overflow-y: hidden; resize: none; line-height: 1.4; }
     input:disabled { opacity: .45; cursor: not-allowed; }
-    .mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border: 1px solid #35344c; border-radius: 9px; background: #11111b; }
-    .mode-button { margin: 0; padding: 7px 5px; color: #9692ae; background: transparent; border: 0; box-shadow: none; font-size: 11px; }
-    .mode-button.active { color: #fff; background: #6556e9; box-shadow: 0 3px 10px #5d55da44; }
+    .mode-switch { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border: 1px solid #35344c; border-radius: 9px; background: #11111b; overflow: hidden; }
+    .mode-switch::before { position: absolute; z-index: 0; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 5px); border-radius: 7px; background: #6556e9; box-shadow: 0 3px 10px #5d55da44; content: ""; pointer-events: none; transition: transform .38s cubic-bezier(.22, .8, .25, 1); }
+    .mode-switch.automatic::before { transform: translateX(calc(100% + 4px)); }
+    .mode-button { position: relative; z-index: 1; margin: 0; padding: 7px 5px; color: #9692ae; background: transparent !important; border: 0; box-shadow: none !important; font-size: 11px; transition: color .25s ease; }
+    .mode-button.active { color: #fff; }
     .interval-field.hidden { display: none; }
     small { display: block; margin-top: 6px; color: #817d99; font-size: 10px; line-height: 1.35; }
     .range-row { display: flex; align-items: center; gap: 9px; }
@@ -54,7 +56,32 @@
     #status { min-height: 15px; margin-top: 9px; color: #7ee2b8; text-align: center; font-size: 11px; }
     .api-usage { margin-top: 10px; color: #817d99; font-size: 10px; text-align: center; }
     .instruction-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .instruction-label-row label { flex: 1; margin-bottom: 5px; }
+    .instruction-label-row { align-items: center; margin-bottom: 6px; }
+    .instruction-label-row label { display: flex; align-items: center; flex: 1; margin: 0; font-size: 12px; line-height: 1.2; }
+    .instruction-toggle { flex: 0 0 auto; width: auto; margin: 0; padding: 4px 8px; color: #aaa6c2; background: #222139; border: 1px solid #393653; box-shadow: none; font-size: 10px; white-space: nowrap; }
+    .instruction-toggle:hover { color: #fff; background: #2b2a3d; }
+    .instruction-toggle:active { color: #fff; background: #2b2a3d; border-color: #7968ff; box-shadow: none; }
+    .field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .field-label-row label { margin-bottom: 5px; }
+    .beta-badge { padding: 2px 5px; border: 1px solid #ff5c6c99; border-radius: 4px; color: #ff6675; background: #ff33441a; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+    .field-label-row .beta-badge { display: none; }
+    .select-shell { position: relative; }
+    .select-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 0; padding: 8px 9px; color: #f4f2ff; background: #11111b; border: 1px solid #35344c; box-shadow: none; text-align: left; font-weight: 400; }
+    .select-toggle:hover, .select-toggle[aria-expanded="true"] { border-color: #7968ff; }
+    .select-toggle > span:last-child { display: inline-block; transition: transform .2s ease; }
+    .select-toggle[aria-expanded="true"] > span:last-child { transform: rotate(180deg); }
+    .select-menu { position: absolute; z-index: 40; top: calc(100% + 3px); right: 0; left: 0; padding: 4px; border: 1px solid #35344c; border-radius: 8px; background: #11111b; box-shadow: 0 10px 24px #0008; }
+    .select-menu[hidden] { display: none; }
+    .select-option { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 0; padding: 7px 8px; border: 0; border-radius: 5px; color: #f4f2ff; background: transparent; box-shadow: none; text-align: left; font-size: 12px; font-weight: 400; }
+    .select-option:hover, .select-option.selected { background: #2b2a3d; }
+    .select-option:active { color: #f4f2ff; background: #393653; border-color: #7968ff; box-shadow: none; }
+    button.select-toggle:active { color: #f4f2ff; background: #11111b; border-color: #7968ff; box-shadow: none; }
+    button.select-option:active { color: #f4f2ff; background: #393653; border-color: #7968ff; box-shadow: none; }
+    button.instruction-toggle:active { color: #fff; background: #2b2a3d; border-color: #7968ff; box-shadow: none; }
+    button.instruction-toggle.flash-show { animation: instruction-show .55s ease; }
+    button.instruction-toggle.flash-hide { animation: instruction-hide .55s ease; }
+    @keyframes instruction-show { 0%, 100% { color: #aaa6c2; background: #222139; border-color: #393653; } 35% { color: #fff; background: #35c878; border-color: #57e39a; box-shadow: 0 0 0 2px #57e39a44, 0 5px 14px #23bd7555; } }
+    @keyframes instruction-hide { 0%, 100% { color: #aaa6c2; background: #222139; border-color: #393653; } 35% { color: #fff; background: #d94b61; border-color: #ff7182; box-shadow: 0 0 0 2px #ff718244, 0 5px 14px #d94b6155; } }
     .snowflake-trigger { position: absolute; z-index: 25; width: 26px; height: 26px; margin: 0; padding: 0; border: 1px solid #8fdcff66; border-radius: 50%; color: #dff8ff; background: #4daeff33; box-shadow: 0 0 14px #62dfff66; font-size: 16px; line-height: 1; }
     .snowflake-trigger:hover { filter: brightness(1.2); transform: rotate(12deg) scale(1.08); }
     .snowflake-trigger:active { background: #35c878; }
@@ -101,6 +128,7 @@
     </details>
     <div class="instruction-label-row">
       <label id="system-instruction-label" for="system-instruction" role="button" tabindex="0" aria-expanded="false" data-i18n="systemInstruction">Системна інструкція</label>
+      <button id="toggle-instruction" class="instruction-toggle" type="button" aria-expanded="true">Сховати</button>
       <button id="snowflake-trigger" class="snowflake-trigger" type="button" hidden aria-label="Відкрити режим зимового вайбу" title="Відкрити режим зимового вайбу">❄</button>
     </div>
     <textarea id="system-instruction" spellcheck="false"></textarea>
@@ -112,8 +140,21 @@
   </section>
   <section class="section">
     <div class="section-title" data-i18n="automation">Автоматизація</div>
+    <div class="field-label-row">
+      <label for="capture-scope" data-i18n="captureArea">Область скриншота</label>
+    </div>
+    <div class="select-shell" id="capture-scope-picker">
+      <button id="capture-scope-toggle" class="select-toggle" type="button" aria-haspopup="listbox" aria-expanded="false">
+        <span id="capture-scope-value">Вся видима вкладка</span><span aria-hidden="true">⌄</span>
+      </button>
+      <div id="capture-scope-menu" class="select-menu" role="listbox" hidden>
+        <button class="select-option" type="button" data-value="full" role="option"><span data-i18n="fullViewport">Вся видима вкладка</span></button>
+        <button class="select-option" type="button" data-value="test" role="option"><span data-i18n="testOnly">Лише область тесту</span><span class="beta-badge">BETA</span></button>
+      </div>
+    </div>
+    <select id="capture-scope" hidden aria-hidden="true"><option value="full">full</option><option value="test">test</option></select>
     <label for="capture-mode" data-i18n="workMode">Режим роботи</label>
-    <div class="mode-switch" role="group" aria-label="Режим роботи">
+    <div id="mode-switch" class="mode-switch" role="group" aria-label="Режим роботи">
       <button id="manual-mode" class="mode-button" type="button" data-mode="manual" data-i18n="manualShort">Ручний</button>
       <button id="automatic-mode" class="mode-button" type="button" data-mode="automatic" data-i18n="automaticShort">Автоматичний</button>
     </div>

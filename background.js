@@ -3,8 +3,9 @@ const DEFAULT_SYSTEM_INSTRUCTION = "You are an advanced visual test-solving AI d
 const REQUEST_TIMEOUT_MS = 15_000;
 const DAILY_REQUEST_LIMIT = 500;
 const REPEAT_ANALYSIS_WINDOW_MS = 5 * 60 * 1000;
-const MAX_GEMINI_ATTEMPTS = 2;
+const MAX_GEMINI_ATTEMPTS = 1;
 const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
+console.warn("ExamPasser: capture diagnostics build 2026-11-28");
 const AUTO_CAPTURE_ALARM = "quickpeek-auto-capture";
 const ANALYSIS_SCHEMA = {
   type: "object",
@@ -125,10 +126,12 @@ async function analyzeActiveTab() {
     const settings = await chrome.storage.local.get({
       apiKey: "",
       systemInstruction: DEFAULT_SYSTEM_INSTRUCTION,
+      captureScope: "full",
       modelMode: "fast",
       precisionMode: "fast",
       includeSelectionHint: false
     });
+    console.warn(`ExamPasser: capture settings scope=${settings.captureScope}, mode=${settings.captureMode}`);
     const apiKey = typeof settings.apiKey === "string" ? settings.apiKey.trim() : "";
     if (!apiKey) {
       await sendMessage(tab.id, { type: "show-result", text: "!" });
@@ -142,8 +145,22 @@ async function analyzeActiveTab() {
     const selectionModeHint = await getSelectionModeHint(tab.id);
     const captureOptions = { format: imageFormat };
     if (imageFormat === "jpeg") captureOptions.quality = 90;
-    const imageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, captureOptions);
-    const imageBase64 = imageDataUrl.replace(new RegExp(`^data:image/${imageFormat};base64,`), "");
+    const fullImageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, captureOptions);
+    const captureRegion = settings.captureScope === "test" ? await getCaptureRegion(tab.id) : null;
+    const cropResult = captureRegion
+      ? await cropScreenshot(fullImageDataUrl, captureRegion)
+      : { dataUrl: fullImageDataUrl, cropped: false };
+    const imageDataUrl = cropResult.dataUrl;
+    const captureMode = settings.captureScope === "test" ? "test" : "full";
+    const captureResult = cropResult.cropped
+      ? "cropped"
+      : captureMode === "test" ? "full-viewport-fallback" : "full-viewport";
+    const controlCount = Number.isFinite(captureRegion?.controls) ? `, controls=${captureRegion.controls}` : "";
+    const layout = captureRegion?.layout ? `, layout=${captureRegion.layout}` : "";
+    const regionStatus = captureRegion ? "region-found" : "region-not-found";
+    console.warn(`ExamPasser: capture mode=${captureMode}, result=${captureResult}, ${regionStatus}${controlCount}${layout}`);
+    const imageMimeType = imageDataUrl.match(/^data:(image\/(?:png|jpeg));base64,/i)?.[1] || `image/${imageFormat}`;
+    const imageBase64 = imageDataUrl.replace(/^data:image\/(?:png|jpeg);base64,/i, "");
     if (!imageBase64) throw new Error("Screenshot data is empty");
 
     const repeatAnalysis = await getRepeatAnalysisState(imageBase64);
@@ -157,7 +174,7 @@ async function analyzeActiveTab() {
       text = await requestGemini({
         apiKey,
         imageBase64,
-        mimeType: `image/${imageFormat}`,
+        mimeType: imageMimeType,
         model: GEMINI_MODEL,
         precisionMode: effectivePrecisionMode,
         selectionHint,
@@ -171,7 +188,7 @@ async function analyzeActiveTab() {
       text = await requestGemini({
         apiKey,
         imageBase64,
-        mimeType: `image/${imageFormat}`,
+        mimeType: imageMimeType,
         model: GEMINI_MODEL,
         precisionMode: effectivePrecisionMode,
         selectionHint,
@@ -256,6 +273,60 @@ async function getSelectionModeHint(tabId) {
   }
 }
 
+async function getCaptureRegion(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: "get-capture-region" });
+    console.warn(`ExamPasser: content capture response=${response ? `controls=${response.controls ?? "unknown"}, layout=${response.layout ?? "unknown"}` : "none"}`);
+    return response && Number.isFinite(response.x) && Number.isFinite(response.y) &&
+      Number.isFinite(response.width) && Number.isFinite(response.height) ? response : null;
+  } catch (error) {
+    console.warn("ExamPasser: capture region unavailable", String(error?.message || "").slice(0, 200));
+    return null;
+  }
+}
+
+async function cropScreenshot(dataUrl, region) {
+  try {
+    if (typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function") {
+      return { dataUrl, cropped: false };
+    }
+    const sourceBlob = await (await fetch(dataUrl)).blob();
+    const bitmap = await createImageBitmap(sourceBlob);
+    const scaleX = bitmap.width / Math.max(1, region.viewportWidth);
+    const scaleY = bitmap.height / Math.max(1, region.viewportHeight);
+    const sourceX = Math.max(0, Math.floor(region.x * scaleX));
+    const sourceY = Math.max(0, Math.floor(region.y * scaleY));
+    const sourceWidth = Math.min(bitmap.width - sourceX, Math.max(1, Math.ceil(region.width * scaleX)));
+    const sourceHeight = Math.min(bitmap.height - sourceY, Math.max(1, Math.ceil(region.height * scaleY)));
+    if (sourceWidth <= 1 || sourceHeight <= 1) {
+      bitmap.close();
+      return { dataUrl, cropped: false };
+    }
+    const canvas = new OffscreenCanvas(sourceWidth, sourceHeight);
+    const context = canvas.getContext("2d", { alpha: false });
+    context.drawImage(bitmap, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
+    bitmap.close();
+    const croppedBlob = await canvas.convertToBlob({ type: "image/png" });
+    return {
+      dataUrl: `data:image/png;base64,${arrayBufferToBase64(await croppedBlob.arrayBuffer())}`,
+      cropped: true
+    };
+  } catch (error) {
+    console.warn("ExamPasser: capture crop failed", String(error?.message || "").slice(0, 200));
+    return { dataUrl, cropped: false };
+  }
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, Math.min(index + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
+}
+
 function isUnsupportedUrl(url = "") {
   return /^(chrome|chrome-extension|edge|about|brave|opera|devtools|view-source):/i.test(url) ||
     /^https?:\/\/chrome\.google\.com\/webstore/i.test(url) ||
@@ -317,10 +388,17 @@ async function requestGemini({ apiKey, imageBase64, mimeType, model, precisionMo
       const data = await response.json();
       if (data?.error) {
         const providerCode = Number(data.error.code) || response.status;
-        throw new Error(`Gemini HTTP ${providerCode}: ${String(data.error.message || "Provider returned an error").slice(0, 500)}`);
+        const error = new Error(`Gemini HTTP ${providerCode}: ${String(data.error.message || "Provider returned an error").slice(0, 500)}`);
+        throw error;
       }
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (typeof text !== "string" || !text.trim()) throw new Error("Gemini returned no text");
+      const candidate = data?.candidates?.[0];
+      const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+      const text = parts
+        .filter((part) => part?.thought !== true && typeof part?.text === "string")
+        .map((part) => part.text.trim())
+        .filter(Boolean)
+        .join("\n") || parts.find((part) => typeof part?.text === "string" && part.text.trim())?.text;
+      if (typeof text !== "string" || !text.trim()) throw new Error(`Gemini returned no usable text (${candidate?.finishReason || "no finish reason"})`);
       return structuredOutput
         ? parseStructuredAnalysis(text, selectionModeHint)
         : parsePlainAnalysis(text, optionHint, selectionModeHint);

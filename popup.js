@@ -25,20 +25,29 @@ Object.assign(TRANSLATIONS.en, { apiKeyPlaceholder: "Enter your API key here..."
 Object.assign(TRANSLATIONS.uk, { selfUninstallEnabled: "Увімкнути самовидалення", selfUninstallShortcut: "Гаряча клавіша видалення", selfUninstallPlaceholder: "Alt+Shift+K", selfUninstallHelp: "Після натискання розширення видалиться без підтвердження.", applyUninstallShortcut: "Застосувати клавішу видалення" });
 Object.assign(TRANSLATIONS.ru, { selfUninstallEnabled: "Включить самоудаление", selfUninstallShortcut: "Горячая клавиша удаления", selfUninstallPlaceholder: "Alt+Shift+K", selfUninstallHelp: "После нажатия расширение удалится без подтверждения.", applyUninstallShortcut: "Применить клавишу удаления" });
 Object.assign(TRANSLATIONS.en, { selfUninstallEnabled: "Enable self-uninstall", selfUninstallShortcut: "Uninstall shortcut", selfUninstallPlaceholder: "Alt+Shift+K", selfUninstallHelp: "Pressing it will uninstall the extension without confirmation.", applyUninstallShortcut: "Apply uninstall shortcut" });
-Object.assign(TRANSLATIONS.uk, { restoreDefaultInstruction: "Вставити стандартну інструкцію" });
-Object.assign(TRANSLATIONS.ru, { restoreDefaultInstruction: "Вставить стандартную инструкцию" });
-Object.assign(TRANSLATIONS.en, { restoreDefaultInstruction: "Insert default instruction" });
+Object.assign(TRANSLATIONS.uk, { restoreDefaultInstruction: "Вставити стандартну інструкцію", hideInstruction: "Сховати інструкцію", showInstruction: "Показати інструкцію" });
+Object.assign(TRANSLATIONS.ru, { restoreDefaultInstruction: "Вставить стандартную инструкцию", hideInstruction: "Скрыть инструкцию", showInstruction: "Показать инструкцию" });
+Object.assign(TRANSLATIONS.en, { restoreDefaultInstruction: "Insert default instruction", hideInstruction: "Hide instruction", showInstruction: "Show instruction" });
 Object.assign(TRANSLATIONS.uk, { requestUsage: "Запити сьогодні: {used} / 500 · залишилось: {remaining}" });
 Object.assign(TRANSLATIONS.ru, { requestUsage: "Запросы сегодня: {used} / 500 · осталось: {remaining}" });
 Object.assign(TRANSLATIONS.en, { requestUsage: "Requests today: {used} / 500 · remaining: {remaining}" });
+Object.assign(TRANSLATIONS.uk, { captureArea: "Область скриншота", fullViewport: "Вся видима вкладка", testOnly: "Лише область тесту" });
+Object.assign(TRANSLATIONS.ru, { captureArea: "Область скриншота", fullViewport: "Вся видимая вкладка", testOnly: "Только область теста" });
+Object.assign(TRANSLATIONS.en, { captureArea: "Screenshot area", fullViewport: "Entire visible tab", testOnly: "Test area only" });
 const apiKeyInput = document.getElementById("api-key");
 const hideApiKeyInput = document.getElementById("hide-api-key");
 const instructionInput = document.getElementById("system-instruction");
 const restoreDefaultInstructionButton = document.getElementById("restore-default-instruction");
+const captureScopeInput = document.getElementById("capture-scope");
+const captureScopeToggle = document.getElementById("capture-scope-toggle");
+const captureScopeValue = document.getElementById("capture-scope-value");
+const captureScopeMenu = document.getElementById("capture-scope-menu");
+const captureScopeOptions = [...document.querySelectorAll("#capture-scope-menu .select-option")];
 const captureModeInput = document.getElementById("capture-mode");
 const captureIntervalInput = document.getElementById("capture-interval");
 const intervalField = document.getElementById("interval-field");
 const modeButtons = [...document.querySelectorAll(".mode-button")];
+const modeSwitch = document.getElementById("mode-switch");
 const selectionHintInput = document.getElementById("selection-hint");
 const requestUsage = document.getElementById("request-usage");
 const opacityInput = document.getElementById("opacity");
@@ -53,6 +62,7 @@ const shortcutSettingsButton = document.getElementById("shortcut-settings");
 const languageInput = document.getElementById("language");
 const status = document.getElementById("status");
 const systemInstructionLabel = document.getElementById("system-instruction-label");
+const toggleInstructionButton = document.getElementById("toggle-instruction");
 const snowflakeTrigger = document.getElementById("snowflake-trigger");
 const winterVibeRow = document.getElementById("winter-vibe-row");
 const winterVibeInput = document.getElementById("winter-vibe");
@@ -60,6 +70,7 @@ const snowLayer = document.getElementById("snow-layer");
 const commandsApi = globalThis.browser?.commands ?? chrome.commands;
 let isCapturingShortcut = false;
 let snowflakeRevealed = false;
+let instructionCollapsed = false;
 let snowDrainTimer = 0;
 let snowCleanupTimer = 0;
 const SNOWFLAKE_POSITION = { top: "auto", right: "auto", left: "18px", bottom: "12px" };
@@ -87,6 +98,31 @@ hideApiKeyInput.addEventListener("change", async () => {
 
 opacityInput.addEventListener("input", () => { opacityValue.textContent = Number(opacityInput.value).toFixed(2); });
 instructionInput.addEventListener("input", resizeInstructionInput);
+captureScopeToggle.addEventListener("click", () => {
+  const expanded = captureScopeToggle.getAttribute("aria-expanded") === "true";
+  captureScopeToggle.setAttribute("aria-expanded", String(!expanded));
+  captureScopeMenu.hidden = expanded;
+});
+captureScopeOptions.forEach((option) => option.addEventListener("click", () => {
+  setCaptureScope(option.dataset.value);
+  captureScopeToggle.setAttribute("aria-expanded", "false");
+  captureScopeMenu.hidden = true;
+}));
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#capture-scope-picker")) {
+    captureScopeToggle.setAttribute("aria-expanded", "false");
+    captureScopeMenu.hidden = true;
+  }
+});
+toggleInstructionButton.addEventListener("click", () => {
+  const willCollapse = !instructionCollapsed;
+  setInstructionCollapsed(willCollapse);
+  toggleInstructionButton.classList.remove("flash-show", "flash-hide");
+  void toggleInstructionButton.offsetWidth;
+  toggleInstructionButton.classList.add(willCollapse ? "flash-hide" : "flash-show");
+  setTimeout(() => toggleInstructionButton.classList.remove("flash-show", "flash-hide"), 600);
+  void chrome.storage.local.set({ systemInstructionCollapsed: instructionCollapsed });
+});
 restoreDefaultInstructionButton.addEventListener("click", () => {
   instructionInput.value = DEFAULT_SYSTEM_INSTRUCTION;
   resizeInstructionInput();
@@ -120,7 +156,7 @@ modeButtons.forEach((button) => button.addEventListener("click", () => {
 saveButton.addEventListener("click", async () => {
   saveButton.disabled = true;
   try {
-    await chrome.storage.local.set({ apiKey: apiKeyInput.value.trim(), apiKeyHidden: hideApiKeyInput.checked, language: languageInput.value === "en" ? "en" : languageInput.value === "ru" ? "ru" : DEFAULT_LANGUAGE, systemInstruction: instructionInput.value.trim() || DEFAULT_SYSTEM_INSTRUCTION, captureMode: captureModeInput.value === "automatic" ? "automatic" : "manual", captureIntervalSeconds: normalizeInterval(captureIntervalInput.value), modelMode: "fast", precisionMode: "precision", includeSelectionHint: selectionHintInput.checked, opacity: normalizeOpacity(opacityInput.value), winterVibe: winterVibeInput.checked, selfUninstallEnabled: selfUninstallEnabledInput.checked });
+    await chrome.storage.local.set({ apiKey: apiKeyInput.value.trim(), apiKeyHidden: hideApiKeyInput.checked, language: languageInput.value === "en" ? "en" : languageInput.value === "ru" ? "ru" : DEFAULT_LANGUAGE, systemInstruction: instructionInput.value.trim() || DEFAULT_SYSTEM_INSTRUCTION, systemInstructionCollapsed: instructionCollapsed, captureScope: captureScopeInput.value === "test" ? "test" : "full", captureMode: captureModeInput.value === "automatic" ? "automatic" : "manual", captureIntervalSeconds: normalizeInterval(captureIntervalInput.value), modelMode: "fast", precisionMode: "precision", includeSelectionHint: selectionHintInput.checked, opacity: normalizeOpacity(opacityInput.value), winterVibe: winterVibeInput.checked, selfUninstallEnabled: selfUninstallEnabledInput.checked });
     showButtonSuccess(saveButton);
     status.textContent = t("saved");
     setTimeout(() => { status.textContent = ""; }, 1600);
@@ -171,13 +207,15 @@ async function applyShortcut(value, commandName = "analyze-screen", button = app
 
 async function loadSettings() {
   try {
-    const settings = await chrome.storage.local.get({ apiKey: "", apiKeyHidden: false, language: DEFAULT_LANGUAGE, systemInstruction: DEFAULT_SYSTEM_INSTRUCTION, captureMode: "manual", captureIntervalSeconds: 60, modelMode: "fast", precisionMode: "fast", includeSelectionHint: false, opacity: DEFAULT_OPACITY, winterVibe: false, selfUninstallEnabled: true });
+    const settings = await chrome.storage.local.get({ apiKey: "", apiKeyHidden: false, language: DEFAULT_LANGUAGE, systemInstruction: DEFAULT_SYSTEM_INSTRUCTION, systemInstructionCollapsed: false, captureScope: "full", captureMode: "manual", captureIntervalSeconds: 60, modelMode: "fast", precisionMode: "fast", includeSelectionHint: false, opacity: DEFAULT_OPACITY, winterVibe: false, selfUninstallEnabled: true });
     apiKeyInput.value = typeof settings.apiKey === "string" ? settings.apiKey : "";
     hideApiKeyInput.checked = settings.apiKeyHidden === true;
     apiKeyInput.type = hideApiKeyInput.checked ? "password" : "text";
     languageInput.value = settings.language === "en" || settings.language === "ru" ? settings.language : DEFAULT_LANGUAGE; applyLanguage(languageInput.value);
     instructionInput.value = typeof settings.systemInstruction === "string" ? settings.systemInstruction : DEFAULT_SYSTEM_INSTRUCTION;
+    setInstructionCollapsed(settings.systemInstructionCollapsed === true, false);
     resizeInstructionInput();
+    setCaptureScope(settings.captureScope === "test" ? "test" : "full", false);
     captureModeInput.value = settings.captureMode === "automatic" ? "automatic" : "manual";
     const savedInterval = (settings.captureIntervalSeconds ?? (Number(settings.captureIntervalMinutes) * 60)) || 60;
     captureIntervalInput.value = String(normalizeInterval(savedInterval)); updateCaptureModeState();
@@ -218,6 +256,8 @@ function applyLanguage(language) {
   document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => { const value = TRANSLATIONS[selectedLanguage][element.dataset.i18nPlaceholder]; if (value) element.placeholder = value; });
   snowflakeTrigger.title = TRANSLATIONS[selectedLanguage].snowflakeHint;
   snowflakeTrigger.setAttribute("aria-label", TRANSLATIONS[selectedLanguage].snowflakeHint);
+  updateInstructionToggleText();
+  updateCaptureScopePicker();
 }
 
 function t(key) { const language = languageInput?.value === "en" ? "en" : languageInput?.value === "ru" ? "ru" : DEFAULT_LANGUAGE; return TRANSLATIONS[language][key] || TRANSLATIONS[DEFAULT_LANGUAGE][key] || key; }
@@ -234,9 +274,36 @@ function showButtonSuccess(button) {
 }
 function updateCaptureModeState() {
   const isAutomatic = captureModeInput.value === "automatic";
+  modeSwitch.classList.toggle("automatic", isAutomatic);
   captureIntervalInput.disabled = !isAutomatic;
   intervalField.classList.toggle("hidden", !isAutomatic);
   modeButtons.forEach((button) => button.classList.toggle("active", button.dataset.mode === captureModeInput.value));
+}
+function setCaptureScope(value, persist = false) {
+  captureScopeInput.value = value === "test" ? "test" : "full";
+  updateCaptureScopePicker();
+  if (persist) void chrome.storage.local.set({ captureScope: captureScopeInput.value });
+}
+function updateCaptureScopePicker() {
+  if (!captureScopeValue) return;
+  const isTest = captureScopeInput.value === "test";
+  captureScopeValue.textContent = t(isTest ? "testOnly" : "fullViewport");
+  captureScopeOptions.forEach((option) => {
+    option.classList.toggle("selected", option.dataset.value === captureScopeInput.value);
+    option.setAttribute("aria-selected", String(option.dataset.value === captureScopeInput.value));
+  });
+}
+function setInstructionCollapsed(collapsed, resize = true) {
+  instructionCollapsed = collapsed === true;
+  instructionInput.hidden = instructionCollapsed;
+  restoreDefaultInstructionButton.hidden = instructionCollapsed;
+  toggleInstructionButton.setAttribute("aria-expanded", String(!instructionCollapsed));
+  updateInstructionToggleText();
+  if (resize && !instructionCollapsed) resizeInstructionInput();
+}
+function updateInstructionToggleText() {
+  if (!toggleInstructionButton) return;
+  toggleInstructionButton.textContent = t(instructionCollapsed ? "showInstruction" : "hideInstruction");
 }
 function resizeInstructionInput() {
   instructionInput.style.height = "auto";

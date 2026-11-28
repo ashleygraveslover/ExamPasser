@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "ExamPasser",
+  "name": "ExamPasser Experiments",
   "version": "1.0.4",
   "description": "Analyze the visible area of the current tab with Gemini.",
   "permissions": ["activeTab", "storage", "scripting", "alarms"],
@@ -8,13 +8,13 @@
   "background": { "scripts": ["background.js"] },
   "browser_specific_settings": {
     "gecko": {
-      "id": "quickpeek-ai@local",
+      "id": "quickpeek-ai-experiments@local",
       "strict_min_version": "128.0",
       "data_collection_permissions": { "required": ["websiteContent"] }
     }
   },
   "action": {
-    "default_title": "ExamPasser",
+    "default_title": "ExamPasser Experiments",
     "default_icon": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png" },
     "default_popup": "popup.html"
   },
